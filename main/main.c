@@ -5,7 +5,8 @@
 #include <esp_idf_version.h>
 #include "driver/spi_master.h"
 #include <max7219.h>
-#include "esp_timer.h"
+
+#include "button_handler.h"
 
 #ifndef APP_CPU_NUM
 #define APP_CPU_NUM PRO_CPU_NUM
@@ -26,7 +27,7 @@
 #define ALL_DIGITS 8
 
 
-
+// global Var
 
 
 
@@ -201,55 +202,17 @@ void task(void *pvParameter)
     }
 }
 
-// Minimum interval between valid presses (ms)
-#define DEBOUNCE_DELAY_MS 100
-
-// Last valid press timestamp
-static int64_t last_press_time = 0;
-volatile bool button_pressed = false;
 
 
 
 
-static void IRAM_ATTR button_isr_handler(void *arg)
-{
-    int64_t now = esp_timer_get_time() / 1000; // current time in ms
-    if ((now - last_press_time) < DEBOUNCE_DELAY_MS)
-        return; // ignore bounces
-
-    last_press_time = now;
-    button_pressed = true;
-    // Safe to handle the button press here (very short!)
-   // ets_printf("Button pressed!\n");
-}
-#define BUTTON_GPIO GPIO_NUM_1 
-
-
-// Configure button with interrupt
-void button_init(void)
-{
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_NEGEDGE,  // falling edge (button press if pulled-up)
-        .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = 1ULL << BUTTON_GPIO,
-        .pull_up_en = GPIO_PULLUP_ENABLE,  // enable internal pull-up
-        .pull_down_en = GPIO_PULLDOWN_DISABLE
-    };
-    gpio_config(&io_conf);
-
-    // Install GPIO ISR service
-    gpio_install_isr_service(0);  // 0 = default flags
-    gpio_isr_handler_add(BUTTON_GPIO, button_isr_handler, (void *)BUTTON_GPIO);
-
-    ESP_LOGI(TAG, "Button configured on GPIO %d", BUTTON_GPIO);
-}
 
 void button_task(void *arg)
 {   
     while (1) {
-        if (button_pressed) {
-
-            button_pressed = false;
+        if (button_get_status()) 
+        {
+            button_set_status(false);
             presses++;
             if (presses > 2) presses = 1;
             // Now it's safe to log or do any processing
@@ -277,7 +240,7 @@ void time_task(void *arg)
             chip++;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -291,11 +254,13 @@ void app_main(void)
   //  wifi_handler_init_sta();
 
 
+    /************************************* */
+    button_init();
+    
+    /************************************* */
+
 
     
-
-
-    button_init();
 
       spi_bus_config_t cfg = {
        .mosi_io_num = MOSI_PIN,
@@ -319,12 +284,12 @@ void app_main(void)
 
     chip=0; row=0; col=0;
 
-
-    xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM);
-    
+    /************************************* */
+    xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
     xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL);
-
     xTaskCreate(time_task, "time_task", 4096, NULL, 5, NULL);
+    /************************************* */
+    
     
 }
 

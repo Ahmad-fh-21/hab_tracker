@@ -10,7 +10,9 @@
                 "${config:idf.espIdfPath}/components/**",
                 "${config:idf.espIdfPathWin}/components/**",
                 "${workspaceFolder}/**",
-                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/FreeRTOS-Kernel-SMP/include"
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/FreeRTOS-Kernel-SMP/include",
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/config/include/freertos",
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_spi/include"
             ],
             "browse": {
                 "path": [

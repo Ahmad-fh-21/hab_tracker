@@ -17,6 +17,9 @@
   ],
   "C_Cpp.errorSquiggles": "enabled",
   "files.associations": {
-    "esp_idf_version.h": "c"
+    "esp_idf_version.h": "c",
+    "wifi_handler.h": "c",
+    "gpio.h": "c",
+    "all_depend.h": "c"
   }
 }
