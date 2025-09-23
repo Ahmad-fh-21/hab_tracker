@@ -166,6 +166,27 @@ esp_err_t max7219_draw_text_7seg(max7219_t *dev, uint8_t pos, const char *s);
  */
 esp_err_t max7219_draw_image_8x8(max7219_t *dev, uint8_t pos, const void *image);
 
+
+/*********************************************************************************** */
+/***********************************my Code **************************************** */
+esp_err_t max7219_update_display(max7219_t *dev, uint8_t framebuffer[]);
+
+void set_pixel(uint8_t row, uint8_t col, bool on,uint8_t framebuffer[]);
+
+esp_err_t max7219_clear_all(max7219_t *dev,uint8_t framebuffer[]);
+
+esp_err_t max7219_clear_chip(max7219_t *dev, uint8_t chip_index,uint8_t framebuffer[]);
+
+/*********************************************************************************** */
+
+
+
+
+
+
+
+
+
 #ifdef __cplusplus
 }
 #endif

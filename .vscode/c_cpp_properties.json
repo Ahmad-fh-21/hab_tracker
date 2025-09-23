@@ -12,7 +12,10 @@
                 "${workspaceFolder}/**",
                 "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/FreeRTOS-Kernel-SMP/include",
                 "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/config/include/freertos",
-                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_spi/include"
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_spi/include",
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/lwip/include/apps",
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_gdbstub/test_gdbstub_host/rv_decode/include",
+                "C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos/FreeRTOS-Kernel-SMP/portable/linux/include/freertos"
             ],
             "browse": {
                 "path": [

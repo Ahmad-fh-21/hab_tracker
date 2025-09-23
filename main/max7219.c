@@ -261,3 +261,48 @@ esp_err_t max7219_draw_image_8x8(max7219_t *dev, uint8_t pos, const void *image)
 
     return ESP_OK;
 }
+
+/*********************************************************************************** */
+/***********************************my Code **************************************** */
+
+
+esp_err_t max7219_update_display(max7219_t *dev, uint8_t framebuffer[])
+{
+    for (uint8_t row = 0; row < dev->digits; row++)
+        max7219_set_digit(dev, row, framebuffer[row]);
+    return ESP_OK;
+}
+
+void set_pixel(uint8_t row, uint8_t col, bool on,uint8_t framebuffer[])
+{
+    if (on)
+        framebuffer[row] |= (1 << col);
+    else
+        framebuffer[row] &= ~(1 << col);
+}
+
+esp_err_t max7219_clear_all(max7219_t *dev,uint8_t framebuffer[])
+{
+    for (uint8_t i = 0; i < 32; i++)
+        framebuffer[i] = 0;
+
+
+    max7219_update_display(dev,framebuffer);    
+    return ESP_OK;
+}
+esp_err_t max7219_clear_chip(max7219_t *dev, uint8_t chip_index,uint8_t framebuffer[])
+{
+    if (chip_index >= 4)  // safety check, since you have 4 chips
+        return ESP_ERR_INVALID_ARG;
+
+    // Each chip handles 8 rows
+    uint8_t start_row = chip_index * 8;
+
+    for (uint8_t i = 0; i < 8; i++) {
+        framebuffer[start_row + i] = 0;
+    }
+
+    // Update display
+    max7219_update_display(dev,framebuffer);
+    return ESP_OK;
+}

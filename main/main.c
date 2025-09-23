@@ -7,6 +7,7 @@
 #include <max7219.h>
 
 #include "button_handler.h"
+#include "time_handler.h"
 
 #ifndef APP_CPU_NUM
 #define APP_CPU_NUM PRO_CPU_NUM
@@ -38,7 +39,7 @@ max7219_t     dev = {
     };
 
 
-
+static void main_update_matrix();
 
 
 esp_err_t max7219_set_dot(max7219_t *dev, uint8_t chip, uint8_t row, uint8_t col)
@@ -75,31 +76,46 @@ esp_err_t max7219_set_dot(max7219_t *dev, uint8_t chip, uint8_t row, uint8_t col
 
 uint8_t framebuffer[32]; // 32 rows (4 chips × 8 rows each)
 
-esp_err_t max7219_update_display(max7219_t *dev)
-{
-    for (uint8_t row = 0; row < dev->digits; row++)
-        max7219_set_digit(dev, row, framebuffer[row]);
-    return ESP_OK;
-}
+// esp_err_t max7219_update_display(max7219_t *dev, uint8_t framebuffer[])
+// {
+//     for (uint8_t row = 0; row < dev->digits; row++)
+//         max7219_set_digit(dev, row, framebuffer[row]);
+//     return ESP_OK;
+// }
 
-void set_pixel(uint8_t row, uint8_t col, bool on)
-{
-    if (on)
-        framebuffer[row] |= (1 << col);
-    else
-        framebuffer[row] &= ~(1 << col);
-}
+// void set_pixel(uint8_t row, uint8_t col, bool on,uint8_t framebuffer[])
+// {
+//     if (on)
+//         framebuffer[row] |= (1 << col);
+//     else
+//         framebuffer[row] &= ~(1 << col);
+// }
 
-esp_err_t max7219_clear_all(max7219_t *dev)
-{
-    for (uint8_t i = 0; i < 32; i++)
-        framebuffer[i] = 0;
+// esp_err_t max7219_clear_all(max7219_t *dev,uint8_t framebuffer[])
+// {
+//     for (uint8_t i = 0; i < 32; i++)
+//         framebuffer[i] = 0;
 
 
-    max7219_update_display(dev);    
-    return ESP_OK;
-}
+//     max7219_update_display(dev,framebuffer);    
+//     return ESP_OK;
+// }
+// esp_err_t max7219_clear_chip(max7219_t *dev, uint8_t chip_index,uint8_t framebuffer[])
+// {
+//     if (chip_index >= 4)  // safety check, since you have 4 chips
+//         return ESP_ERR_INVALID_ARG;
 
+//     // Each chip handles 8 rows
+//     uint8_t start_row = chip_index * 8;
+
+//     for (uint8_t i = 0; i < 8; i++) {
+//         framebuffer[start_row + i] = 0;
+//     }
+
+//     // Update display
+//     max7219_update_display(dev,framebuffer);
+//     return ESP_OK;
+// }
 
 static const char *TAG = "main";
 
@@ -178,15 +194,16 @@ void task(void *pvParameter)
             
         // }
 
+
         switch (presses)
         {
         case 1:
-            set_pixel(chip * 8 + row, col, toogle_state(&state));
-            max7219_update_display(&dev);
+            // set_pixel(chip * 8 + row, col, toogle_state(&state));
+            // max7219_update_display(&dev);
             break;
         case 2:
-            set_pixel(chip * 8 + row, col, true);
-            max7219_update_display(&dev);
+            // set_pixel(chip * 8 + row, col, true);
+            // max7219_update_display(&dev);
             break;
         // case 3:
         //     set_pixel(chip * 8 + row, col, toogle_state(&state));
@@ -228,31 +245,121 @@ void time_task(void *arg)
 {   
     while (1) 
     {
-        col++;
-        if (col >= 8)
-        {
-            col = 0;
-            row++;
-        }
-        if (row >= 8)
-        {
-            row = 0;
-            chip++;
-        }
+        // col++;
+        // if (col >= 8)
+        // {
+        //     col = 0;
+        //     row++;
+        // }
+        // if (row >= 8)
+        // {
+        //     row = 0;
+        //     chip++;
+        // }
 
         vTaskDelay(pdMS_TO_TICKS(500));
     }
+}
+
+typedef struct {
+    int year;
+    int month;
+    int day;
+    int hour;
+    int min;
+}time_storage_t;
+
+time_storage_t mytime;
+
+void time_server_task(void *arg)
+{   
+    while (1) 
+    {
+       // time_handler_get_time_from_server();
+
+        // mytime.year  = time_handler_get_year();
+        // mytime.month = time_handler_get_month();
+        // mytime.day   = time_handler_get_day();
+        // mytime.hour  = time_handler_get_hour();
+        // mytime.min   = time_handler_get_minute();
+
+        mytime.day++;
+        if (mytime.day > 31)
+           {
+            ++mytime.month;
+
+            // if (mytime.month % 3 == 0)
+            // max7219_clear_chip(&dev,( 3  ));
+            // else
+            // max7219_clear_chip(&dev,( mytime.month % 3  ));
+            mytime.day = 0;
+           } 
+
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+
+void update_led_position_task(void *arg)
+{   
+    while (1) 
+    {
+
+        // printf("Year: %d\n", mytime.year );
+        // printf("Month: %d\n", mytime.month );  // tm_mon: 0 = Jan
+        // printf("Day: %d\n", mytime.day);
+        // printf("Hour: %d\n", mytime.hour);
+        // printf("Minute: %d\n", mytime.min);
+
+        
+        main_update_matrix();
+        
+        
+       // vTaskDelay(pdMS_TO_TICKS(10000));
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+static void main_update_matrix()
+{
+    if ((mytime.day -1) % 7 == 0 && mytime.day != 1 )  // get correct col
+    {
+        col = 0;
+    }
+    else
+    {
+        col = (mytime.day -1) % 7;
+    }
+
+    chip = mytime.month % 4;  // get correct chip 
+    row =(int) ((mytime.day - 1) / 7);   // get correct row
+
+    if (col == 0 && row == 0) // if new month / chip clear old saving
+        max7219_clear_chip(&dev,chip,framebuffer);
+    
+
+    // printf("col: %d\n", col);
+    // printf("row: %d\n", row);
+    // printf("chip: %d\n", chip);
+    // set_pixel(chip * 8 + row, col, true);
+    // send the new data
+    set_pixel(chip * 8 + row, col, true,framebuffer);
+    max7219_update_display(&dev,framebuffer);
 }
 
 
 
 void app_main(void)
 {
-    //wifi_handler_init_NVM();
 
-   // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-  //  wifi_handler_init_sta();
+    // wifi_handler_init_NVM();
 
+    // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    // wifi_handler_init_sta();
+    // time_handler_init();
+    
+    // time_handler_get_time_from_server();
 
     /************************************* */
     button_init();
@@ -262,7 +369,20 @@ void app_main(void)
 
     
 
-      spi_bus_config_t cfg = {
+
+    mytime.day = 0;
+    mytime.month = 2;
+    // printf("Year: %d\n", time_handler_get_year());
+    // printf("Month: %d\n", time_handler_get_month());  // tm_mon: 0 = Jan
+    // printf("Day: %d\n", time_handler_get_day());
+    // printf("Hour: %d\n", time_handler_get_hour());
+    // printf("Minute: %d\n", time_handler_get_minute());
+
+
+
+
+
+    spi_bus_config_t cfg = {
        .mosi_io_num = MOSI_PIN,
        .miso_io_num = -1,
        .sclk_io_num = CLK_PIN,
@@ -288,6 +408,8 @@ void app_main(void)
     xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
     xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL);
     xTaskCreate(time_task, "time_task", 4096, NULL, 5, NULL);
+    xTaskCreate(time_server_task, "time_server_task", 4096, NULL, 5, NULL);
+    xTaskCreate(update_led_position_task, "update_led_position_task", 4096, NULL, 5, NULL);
     /************************************* */
     
     

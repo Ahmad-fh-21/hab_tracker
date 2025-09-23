@@ -20,6 +20,7 @@
     "esp_idf_version.h": "c",
     "wifi_handler.h": "c",
     "gpio.h": "c",
-    "all_depend.h": "c"
+    "all_depend.h": "c",
+    "_locale.h": "c"
   }
 }
