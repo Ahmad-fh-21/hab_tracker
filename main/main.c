@@ -8,6 +8,8 @@
 
 #include "button_handler.h"
 #include "time_handler.h"
+#include "sleep_handler.h"
+#include "nvm_handler.h"
 
 #ifndef APP_CPU_NUM
 #define APP_CPU_NUM PRO_CPU_NUM
@@ -19,6 +21,7 @@
 #define HOST    SPI2_HOST
 #endif
 
+// display chip number and SPI pis
 #define CASCADE_SIZE 4
 #define MOSI_PIN 18
 #define CS_PIN 17 
@@ -26,12 +29,35 @@
 
 
 #define ALL_DIGITS 8
+#define STANDBY_TIME_IN_SEC   30
+#define QUEUE_LENGTH 7
 
 
 // global Var
+QueueHandle_t sleep_queue;
+bool ready_to_sleep = false;      // for the Queue
+
+uint8_t   secCounter = 0;             // to count the standby sec - when is equal to STANDBY_TIME_IN_SEC device goes to sleep
+uint16_t  calculated_sleep_time = 0;  // to store the time in sec for the sleep wake up timer
+
+bool      set_value = false; // to store the last selected LED status by user
+
+
+uint8_t presses = 0;    // to store the button presses number 
+bool state = false;     // to store the last LED state - used for blinking and chossing the set during Operation
+
+uint8_t framebuffer[FRAMEBUFFER_SIZE];   // Panel 1 values
+uint8_t framebuffer2[FRAMEBUFFER_SIZE];  // to be used to add a sec Panel 
+bool firstboot = true;    // to indicate if this is the First boot - this bool will be used only once and then the NVM is initialized
+
+uint8_t chip,row,col;   // to control the LED position - calculated throw the month - day 
 
 
 
+
+time_storage_t mytime;  // var to stroe the time after getting it from the time_handler
+
+// for the display init
 max7219_t     dev = {
     .cascade_size = CASCADE_SIZE,
     .digits = 0,
@@ -40,83 +66,17 @@ max7219_t     dev = {
 
 
 static void main_update_matrix();
+static void main_init_display();
+static void main_init_NVM();
+bool toogle_state(bool *state);
 
 
-esp_err_t max7219_set_dot(max7219_t *dev, uint8_t chip, uint8_t row, uint8_t col)
-{
-    // CHECK_ARG(dev);
-    // CHECK_ARG(chip < dev->cascade_size);
-    // CHECK_ARG(row < ALL_DIGITS);
-    // CHECK_ARG(col < 8);
-
-    // Compute absolute digit index across all cascades
-    uint8_t digit = chip * ALL_DIGITS + row;
-
-    // Prepare bit pattern for that column
-    uint8_t val = 1 << col;
-
-    return max7219_set_digit(dev, digit, val);
-}
-
-// uint8_t framebuffers[8]; // 8 rows
-
-// esp_err_t max7219_set_dot_fb(max7219_t *dev, uint8_t row, uint8_t col, bool on)
-// {
-//     // CHECK_ARG(dev);
-//     // CHECK_ARG(row < ALL_DIGITS);
-//     // CHECK_ARG(col < 8);
-
-//     if (on)
-//         framebuffers[row] |= (1 << col);   // set bit
-//     else
-//         framebuffers[row] &= ~(1 << col);  // clear bit
-
-//     return max7219_set_digit(dev, row, framebuffers[row]);
-// }
-
-uint8_t framebuffer[32]; // 32 rows (4 chips × 8 rows each)
-
-// esp_err_t max7219_update_display(max7219_t *dev, uint8_t framebuffer[])
-// {
-//     for (uint8_t row = 0; row < dev->digits; row++)
-//         max7219_set_digit(dev, row, framebuffer[row]);
-//     return ESP_OK;
-// }
-
-// void set_pixel(uint8_t row, uint8_t col, bool on,uint8_t framebuffer[])
-// {
-//     if (on)
-//         framebuffer[row] |= (1 << col);
-//     else
-//         framebuffer[row] &= ~(1 << col);
-// }
-
-// esp_err_t max7219_clear_all(max7219_t *dev,uint8_t framebuffer[])
-// {
-//     for (uint8_t i = 0; i < 32; i++)
-//         framebuffer[i] = 0;
 
 
-//     max7219_update_display(dev,framebuffer);    
-//     return ESP_OK;
-// }
-// esp_err_t max7219_clear_chip(max7219_t *dev, uint8_t chip_index,uint8_t framebuffer[])
-// {
-//     if (chip_index >= 4)  // safety check, since you have 4 chips
-//         return ESP_ERR_INVALID_ARG;
 
-//     // Each chip handles 8 rows
-//     uint8_t start_row = chip_index * 8;
 
-//     for (uint8_t i = 0; i < 8; i++) {
-//         framebuffer[start_row + i] = 0;
-//     }
 
-//     // Update display
-//     max7219_update_display(dev,framebuffer);
-//     return ESP_OK;
-// }
-
+//
 static const char *TAG = "main";
 
 
@@ -143,15 +103,35 @@ static const char *TAG = "main";
 
 
 
-uint8_t chip,row,col;
 
-uint8_t presses = 0;
-bool state = false;
 
-bool toogle_state(bool *state)
+
+
+
+
+
+
+void sleep_task(void *pvParameters) 
 {
-    return *state = !*state;
+    while (1) 
+    {
+        // Wait indefinitely for data to arrive in the queue
+        if (xQueueReceive(sleep_queue, &ready_to_sleep, portMAX_DELAY) == pdPASS) 
+        {
+            
+            set_pixel(chip * 8 + row, col, set_value,framebuffer);
+            max7219_update_display(&dev,framebuffer);
+            ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,true));
+            ESP_LOGI(TAG, "Saving data before deep sleep...");
+            nvm_handler_save_data_to_nvs(framebuffer, firstboot, framebuffer2);
+            sleep_go_to_deep_sleep(30);
+        }
+    }
 }
+
+
+
+
 
 void task(void *pvParameter)
 {
@@ -166,7 +146,7 @@ void task(void *pvParameter)
 
 //    // size_t offs = 0;
 
-     ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
+     
 
    while (1)
     {
@@ -194,16 +174,32 @@ void task(void *pvParameter)
             
         // }
 
-
+        if (button_get_status()) 
+        {
+            ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,false));
+            ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
+            button_set_status(false);
+            presses++;
+            if (presses > 2) presses = 1;
+            // Now it's safe to log or do any processing
+            printf("Button pressed!\n");
+            //max7219_clear_all(&dev);
+            secCounter = 0; // reset the conter to wait agian from 0
+        }
         switch (presses)
         {
         case 1:
-            // set_pixel(chip * 8 + row, col, toogle_state(&state));
-            // max7219_update_display(&dev);
+            set_value = false;
+            set_pixel(chip * 8 + row, col, toogle_state(&state),framebuffer);
+            max7219_update_display(&dev,framebuffer);
+            
+
             break;
         case 2:
-            // set_pixel(chip * 8 + row, col, true);
-            // max7219_update_display(&dev);
+            set_value = true;
+            set_pixel(chip * 8 + row, col, true,framebuffer);
+            max7219_update_display(&dev,framebuffer);
+            
             break;
         // case 3:
         //     set_pixel(chip * 8 + row, col, toogle_state(&state));
@@ -215,29 +211,25 @@ void task(void *pvParameter)
         }
 
 
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
-
-
-
-
 
 
 void button_task(void *arg)
 {   
     while (1) {
-        if (button_get_status()) 
-        {
-            button_set_status(false);
-            presses++;
-            if (presses > 2) presses = 1;
-            // Now it's safe to log or do any processing
-            printf("Button pressed!\n");
-            //max7219_clear_all(&dev);
+        // if (button_get_status()) 
+        // {
+        //     button_set_status(false);
+        //     presses++;
+        //     if (presses > 2) presses = 1;
+        //     // Now it's safe to log or do any processing
+        //     printf("Button pressed!\n");
+        //     //max7219_clear_all(&dev);
 
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // }
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
@@ -245,60 +237,23 @@ void time_task(void *arg)
 {   
     while (1) 
     {
-        // col++;
-        // if (col >= 8)
-        // {
-        //     col = 0;
-        //     row++;
-        // }
-        // if (row >= 8)
-        // {
-        //     row = 0;
-        //     chip++;
-        // }
+        ESP_LOGI(TAG, "secConter %d", secCounter);
+        if (secCounter == STANDBY_TIME_IN_SEC)
+        {
+            
+                if (xQueueSend(sleep_queue, &ready_to_sleep, pdMS_TO_TICKS(100)) == pdPASS) 
+                {
+                    vTaskSuspend(NULL);  // Suspend self after sending to sleep queue
+                } 
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-}
-
-typedef struct {
-    int year;
-    int month;
-    int day;
-    int hour;
-    int min;
-}time_storage_t;
-
-time_storage_t mytime;
-
-void time_server_task(void *arg)
-{   
-    while (1) 
-    {
-       // time_handler_get_time_from_server();
-
-        // mytime.year  = time_handler_get_year();
-        // mytime.month = time_handler_get_month();
-        // mytime.day   = time_handler_get_day();
-        // mytime.hour  = time_handler_get_hour();
-        // mytime.min   = time_handler_get_minute();
-
-        mytime.day++;
-        if (mytime.day > 31)
-           {
-            ++mytime.month;
-
-            // if (mytime.month % 3 == 0)
-            // max7219_clear_chip(&dev,( 3  ));
-            // else
-            // max7219_clear_chip(&dev,( mytime.month % 3  ));
-            mytime.day = 0;
-           } 
-
+        secCounter++;
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
+
+
 
 
 void update_led_position_task(void *arg)
@@ -306,18 +261,27 @@ void update_led_position_task(void *arg)
     while (1) 
     {
 
+        time_handler_get_time_from_server();
+
+        mytime.month = time_handler_get_month();
+        mytime.day   = time_handler_get_day();
+        mytime.hour  = time_handler_get_hour();
+        mytime.min   = time_handler_get_minute();
+        mytime.sec   = time_handler_get_sec();
+
+        calculated_sleep_time = mytime.sec + ((60 - mytime.min) * 60 );
+
+        main_update_matrix();
+        
         // printf("Year: %d\n", mytime.year );
         // printf("Month: %d\n", mytime.month );  // tm_mon: 0 = Jan
         // printf("Day: %d\n", mytime.day);
         // printf("Hour: %d\n", mytime.hour);
         // printf("Minute: %d\n", mytime.min);
-
-        
-        main_update_matrix();
-        
-        
+        // printf("sec: %d\n", mytime.sec);
+        // printf("time to sleep: %d\n", calculated_sleep_time);
        // vTaskDelay(pdMS_TO_TICKS(10000));
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(1500));
     }
 }
 
@@ -335,14 +299,24 @@ static void main_update_matrix()
     chip = mytime.month % 4;  // get correct chip 
     row =(int) ((mytime.day - 1) / 7);   // get correct row
 
+    // if ((mytime.min -1) % 7 == 0 && mytime.min != 1 )  // get correct col
+    // {
+    //     col = 0;
+    // }
+    // else
+    // {
+    //     col = (mytime.min -1) % 7;
+    // }
+
+    // chip = mytime.month % 4;  // get correct chip 
+    // row =(int) ((mytime.min - 1) / 7);   // get correct row
+
+
+
+
     if (col == 0 && row == 0) // if new month / chip clear old saving
         max7219_clear_chip(&dev,chip,framebuffer);
     
-
-    // printf("col: %d\n", col);
-    // printf("row: %d\n", row);
-    // printf("chip: %d\n", chip);
-    // set_pixel(chip * 8 + row, col, true);
     // send the new data
     set_pixel(chip * 8 + row, col, true,framebuffer);
     max7219_update_display(&dev,framebuffer);
@@ -353,35 +327,75 @@ static void main_update_matrix()
 void app_main(void)
 {
 
-    // wifi_handler_init_NVM();
 
-    // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    // wifi_handler_init_sta();
-    // time_handler_init();
-    
-    // time_handler_get_time_from_server();
-
+    uint64_t start = esp_timer_get_time();
     /************************************* */
     button_init();
     
+    wifi_handler_init_NVM();
+
+    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    wifi_handler_init_sta();
+    time_handler_init();
+    
+    time_handler_get_time_from_server();
+
     /************************************* */
 
 
+
+    nvm_handler_clear_nvs_data();  //<--------------- comment when SW is finished
+    main_init_NVM();
+
+
+    main_init_display();
+    ESP_LOGI(TAG, "in main");
+
+    // Print wake up reason
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+    sleep_handler_print_wake_reason( wakeup_reason);
+    // if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER )
+    // {
+    //     wifi_handler_init_NVM();
+
+    //     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    //     wifi_handler_init_sta();
+    //     time_handler_init();
+        
+    //     time_handler_get_time_from_server();
+    // }
+
+   // chip=0; row=0; col=0;
+
+
+    // Create the queue
+    sleep_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
+    if (sleep_queue == NULL) 
+    {
+        ESP_LOGE(TAG, "Sleep Queue creation failed!");
+        return;
+    }
+
+
+    /************************************* */
+    xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
+   // xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL);
+    xTaskCreate(time_task, "time_task", 4096, NULL, 4, NULL);
+    xTaskCreate(update_led_position_task, "update_led_position_task", 4096, NULL, 5, NULL);
+    // Start sensor reading task
+    xTaskCreate(sleep_task, "sleep_task", 4096, NULL, 5, NULL);
+    /************************************* */
     
 
-
-    mytime.day = 0;
-    mytime.month = 2;
-    // printf("Year: %d\n", time_handler_get_year());
-    // printf("Month: %d\n", time_handler_get_month());  // tm_mon: 0 = Jan
-    // printf("Day: %d\n", time_handler_get_day());
-    // printf("Hour: %d\n", time_handler_get_hour());
-    // printf("Minute: %d\n", time_handler_get_minute());
+    uint64_t end = esp_timer_get_time(); 
+    
+    ESP_LOGI(TAG, " took %llu microseconds", (end - start));
+}
 
 
-
-
-
+static void main_init_display()
+{
     spi_bus_config_t cfg = {
        .mosi_io_num = MOSI_PIN,
        .miso_io_num = -1,
@@ -393,31 +407,50 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(spi_bus_initialize(HOST, &cfg, SPI_DMA_CH_AUTO));
 
-
-    // dev = {
-    // .cascade_size = CASCADE_SIZE,
-    // .digits = 0,
-    // .mirrored = true
-    // };
     ESP_ERROR_CHECK(max7219_init_desc(&dev, HOST, MAX7219_MAX_CLOCK_SPEED_HZ, CS_PIN));
     ESP_ERROR_CHECK(max7219_init(&dev));
 
-    chip=0; row=0; col=0;
-
-    /************************************* */
-    xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
-    xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL);
-    xTaskCreate(time_task, "time_task", 4096, NULL, 5, NULL);
-    xTaskCreate(time_server_task, "time_server_task", 4096, NULL, 5, NULL);
-    xTaskCreate(update_led_position_task, "update_led_position_task", 4096, NULL, 5, NULL);
-    /************************************* */
-    
-    
+    ESP_ERROR_CHECK(max7219_set_brightness(&dev, 0));
+    ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev, true));
 }
 
+static void main_init_NVM()
+{
+        // Load data from NVS on startup
+    nvm_handler_load_data_from_nvs(framebuffer, &firstboot, framebuffer2);
+    ESP_LOGI(TAG, "firstboot state %d",firstboot);
+    // Check if this is first boot
+    if (firstboot) 
+    {
+    nvm_handler_clear_nvs_data();
+    ESP_LOGI(TAG, "This is the first boot!");
+    // For "VIT" in last 3 rows of chip 0 
+    framebuffer[5] = 0b01100110;   // V I T (top row)
+    framebuffer[6] = 0b00111100;   // V I T (middle row)  
+    framebuffer[7] = 0b00011000;   // V I T (bottom row)
 
+    // For "VIT" in last 3 rows of chip 1 
+    framebuffer[13] = 0b00011000;  
+    framebuffer[14] = 0b00011000;  
+    framebuffer[15] = 0b00011000;  
 
+    // For "VIT" in last 3 rows of chip 2 
+    framebuffer[21] = 0b01111110;  
+    framebuffer[22] = 0b00011000;  
+    framebuffer[23] = 0b00011000;  
 
+        firstboot = false; // Set to false after first boot
+    } else {
+        ESP_LOGI(TAG, "This is a subsequent boot, framebuffers restored");
+    }
+
+}
+
+// toggle last stored value for the LED - used in blinking 
+bool toogle_state(bool *state)
+{
+    return *state = !*state;
+}
 
 
 

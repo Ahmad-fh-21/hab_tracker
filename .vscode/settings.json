@@ -21,6 +21,7 @@
     "wifi_handler.h": "c",
     "gpio.h": "c",
     "all_depend.h": "c",
-    "_locale.h": "c"
+    "_locale.h": "c",
+    "nvm_handler.h": "c"
   }
 }

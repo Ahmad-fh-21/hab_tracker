@@ -7,7 +7,7 @@
 
 // Last valid press timestamp
 static int64_t last_press_time = 0;
-volatile bool button_status ;
+volatile bool button_status  = false;
 
 static const char *TAG = "Button";
 
