@@ -33,7 +33,7 @@ void sleep_go_to_deep_sleep(uint64_t time_in_sec)
     // Wait a bit to ensure pin is stable before sleep
     vTaskDelay(pdMS_TO_TICKS(100));
     
-    esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask, ESP_EXT1_WAKEUP_ALL_LOW);
+    esp_sleep_enable_ext1_wakeup(ext_wakeup_pin_1_mask, ESP_EXT1_WAKEUP_ANY_LOW );
 
     // Power Impact:
     //Without isolation: Deep sleep current ~15-20µA
@@ -67,7 +67,7 @@ void sleep_handler_print_wake_reason(esp_sleep_wakeup_cause_t wakeup_reason)
         ESP_LOGI(TAG, "Wakeup caused by ULP program");
         break;
     default:
-        ESP_LOGI(TAG, "Not a deep sleep reset");
+        ESP_LOGI(TAG, "Not a deep sleep reset %d",wakeup_reason);
         break;
     }
 }

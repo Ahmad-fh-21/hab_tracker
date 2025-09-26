@@ -33,29 +33,37 @@
 #define QUEUE_LENGTH 7
 
 
+
+enum USER
+{
+    USER_1 = 0,
+    USER_2,
+};
+
+uint8_t user_panel = USER_1;           // var to switch between User panels
+bool    set_value = false;             // to store the last selected LED status by user
+bool    set_value_2 = false;           // to store the last selected LED status by user 2 
+bool    user_switch = false;           // to indicate if a user switch happens
+
+
 // global Var
 QueueHandle_t sleep_queue;
-bool ready_to_sleep = false;      // for the Queue
+bool ready_to_sleep = false;           // for the Queue
 
-uint8_t   secCounter = 0;             // to count the standby sec - when is equal to STANDBY_TIME_IN_SEC device goes to sleep
-uint16_t  calculated_sleep_time = 0;  // to store the time in sec for the sleep wake up timer
-
-bool      set_value = false; // to store the last selected LED status by user
+uint8_t   secCounter = 0;              // to count the standby sec - when is equal to STANDBY_TIME_IN_SEC device goes to sleep
+uint16_t  calculated_sleep_time = 0;   // to store the time in sec for the sleep wake up timer
 
 
-uint8_t presses = 0;    // to store the button presses number 
-bool state = false;     // to store the last LED state - used for blinking and chossing the set during Operation
-
+uint8_t presses = 0;                   // to store the button presses number 
+bool state = false;                    // to store the last LED state - used for blinking and chossing the set during Operation
+bool state2 = false;                   // to store the last LED  2 state - used for blinking and chossing the set during Operation
 uint8_t framebuffer[FRAMEBUFFER_SIZE];   // Panel 1 values
 uint8_t framebuffer2[FRAMEBUFFER_SIZE];  // to be used to add a sec Panel 
-bool firstboot = true;    // to indicate if this is the First boot - this bool will be used only once and then the NVM is initialized
+bool firstboot = true;                 // to indicate if this is the First boot - this bool will be used only once and then the NVM is initialized
 
-uint8_t chip,row,col;   // to control the LED position - calculated throw the month - day 
+uint8_t chip,row,col;                  // to control the LED position - calculated throw the month - day 
 
-
-
-
-time_storage_t mytime;  // var to stroe the time after getting it from the time_handler
+time_storage_t mytime;                 // var to stroe the time after getting it from the time_handler
 
 // for the display init
 max7219_t     dev = {
@@ -65,18 +73,20 @@ max7219_t     dev = {
     };
 
 
+//           LOCAL FUNCTIONS 
+/*************************************** */
 static void main_update_matrix();
 static void main_init_display();
 static void main_init_NVM();
 bool toogle_state(bool *state);
 
+static void main_short_long_press_handler();
+static void main_led_status_slecter_handler();
 
 
 
 
-
-
-//
+// for Serial Monitor 
 static const char *TAG = "main";
 
 
@@ -121,6 +131,10 @@ void sleep_task(void *pvParameters)
             
             set_pixel(chip * 8 + row, col, set_value,framebuffer);
             max7219_update_display(&dev,framebuffer);
+
+            set_pixel(chip * 8 + row, col, set_value_2,framebuffer2);
+            max7219_update_display(&dev,framebuffer2);
+
             ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,true));
             ESP_LOGI(TAG, "Saving data before deep sleep...");
             nvm_handler_save_data_to_nvs(framebuffer, firstboot, framebuffer2);
@@ -128,7 +142,6 @@ void sleep_task(void *pvParameters)
         }
     }
 }
-
 
 
 
@@ -174,64 +187,14 @@ void task(void *pvParameter)
             
         // }
 
-        if (button_get_status()) 
-        {
-            ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,false));
-            ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
-            button_set_status(false);
-            presses++;
-            if (presses > 2) presses = 1;
-            // Now it's safe to log or do any processing
-            printf("Button pressed!\n");
-            //max7219_clear_all(&dev);
-            secCounter = 0; // reset the conter to wait agian from 0
-        }
-        switch (presses)
-        {
-        case 1:
-            set_value = false;
-            set_pixel(chip * 8 + row, col, toogle_state(&state),framebuffer);
-            max7219_update_display(&dev,framebuffer);
-            
-
-            break;
-        case 2:
-            set_value = true;
-            set_pixel(chip * 8 + row, col, true,framebuffer);
-            max7219_update_display(&dev,framebuffer);
-            
-            break;
-        // case 3:
-        //     set_pixel(chip * 8 + row, col, toogle_state(&state));
-        //     max7219_update_display(&dev);
-        //     break;
-        
-        default:
-            break;
-        }
-
+         main_short_long_press_handler();
+         main_led_status_slecter_handler();
+       
 
         vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
-
-void button_task(void *arg)
-{   
-    while (1) {
-        // if (button_get_status()) 
-        // {
-        //     button_set_status(false);
-        //     presses++;
-        //     if (presses > 2) presses = 1;
-        //     // Now it's safe to log or do any processing
-        //     printf("Button pressed!\n");
-        //     //max7219_clear_all(&dev);
-
-        // }
-        vTaskDelay(pdMS_TO_TICKS(250));
-    }
-}
 
 void time_task(void *arg)
 {   
@@ -315,11 +278,15 @@ static void main_update_matrix()
 
 
     if (col == 0 && row == 0) // if new month / chip clear old saving
+    {
         max7219_clear_chip(&dev,chip,framebuffer);
+        max7219_clear_chip(&dev,chip,framebuffer2);
+    }
+
     
     // send the new data
-    set_pixel(chip * 8 + row, col, true,framebuffer);
-    max7219_update_display(&dev,framebuffer);
+    // set_pixel(chip * 8 + row, col, true,framebuffer);
+    // max7219_update_display(&dev,framebuffer);
 }
 
 
@@ -355,19 +322,13 @@ void app_main(void)
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
 
     sleep_handler_print_wake_reason( wakeup_reason);
-    // if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER )
-    // {
-    //     wifi_handler_init_NVM();
-
-    //     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    //     wifi_handler_init_sta();
-    //     time_handler_init();
-        
-    //     time_handler_get_time_from_server();
-    // }
-
-   // chip=0; row=0; col=0;
-
+    if (wakeup_reason != ESP_SLEEP_WAKEUP_TIMER  && wakeup_reason != 0 )
+    {   
+        sleep_handler_print_wake_reason( wakeup_reason);
+        ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,false));
+        ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
+        max7219_update_display(&dev,framebuffer);
+    }
 
     // Create the queue
     sleep_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
@@ -380,7 +341,7 @@ void app_main(void)
 
     /************************************* */
     xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
-   // xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL);
+    xTaskCreate(button_task, "button_task", 4096, NULL, 4, NULL); // task function in Button_handler.c
     xTaskCreate(time_task, "time_task", 4096, NULL, 4, NULL);
     xTaskCreate(update_led_position_task, "update_led_position_task", 4096, NULL, 5, NULL);
     // Start sensor reading task
@@ -416,7 +377,7 @@ static void main_init_display()
 
 static void main_init_NVM()
 {
-        // Load data from NVS on startup
+    // Load data from NVS on startup
     nvm_handler_load_data_from_nvs(framebuffer, &firstboot, framebuffer2);
     ESP_LOGI(TAG, "firstboot state %d",firstboot);
     // Check if this is first boot
@@ -439,8 +400,25 @@ static void main_init_NVM()
     framebuffer[22] = 0b00011000;  
     framebuffer[23] = 0b00011000;  
 
-        firstboot = false; // Set to false after first boot
-    } else {
+    // For "GYM" in last 3 rows of chip 0 
+    framebuffer2[5] = 0b01111000;   
+    framebuffer2[6] = 0b01100011;   
+    framebuffer2[7] = 0b01111101;   
+
+    // For "GYM" in last 3 rows of chip 1 
+    framebuffer2[13] = 0b01100110;  
+    framebuffer2[14] = 0b00011000;  
+    framebuffer2[15] = 0b00011000;  
+
+    // For "GYM"" in last 3 rows of chip 2 
+    framebuffer2[21] = 0b11111111;  
+    framebuffer2[22] = 0b11011011;  
+    framebuffer2[23] = 0b11011011;  
+
+    firstboot = false; // Set to false after first boot
+    } 
+    else 
+    {
         ESP_LOGI(TAG, "This is a subsequent boot, framebuffers restored");
     }
 
@@ -454,3 +432,84 @@ bool toogle_state(bool *state)
 
 
 
+static void main_short_long_press_handler()
+{
+    
+        if(button_get_press_type() == SHORT)
+        {
+            button_set_press_type(IDLE);
+            ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,false));
+            ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
+           user_switch = false;
+            presses++;
+            if (presses > 2) presses = 1;
+            
+            printf("Button pressed!\n");
+            //max7219_clear_all(&dev);
+            secCounter = 0; // reset the conter to wait agian from 0
+        }
+        else if (button_get_press_type() == LONG)
+        {
+            button_set_press_type(IDLE);
+            if (user_panel == USER_1) 
+            {
+                user_panel = USER_2;
+                max7219_update_display(&dev,framebuffer2);
+            }
+            else
+            {
+                user_panel = USER_1;
+                max7219_update_display(&dev,framebuffer);
+            } 
+            printf("Button pressed LONG!\n");
+            
+            user_switch = true;
+        }
+
+}
+
+
+static void main_led_status_slecter_handler()
+{
+    switch (presses)
+    {
+    case 1:
+        if (user_panel == USER_1 && user_switch == false)
+        {
+            set_value = false;
+            set_pixel(chip * 8 + row, col, toogle_state(&state),framebuffer);
+            max7219_update_display(&dev,framebuffer);
+        }
+        else if (user_panel == USER_2 && user_switch == false)
+        {
+            set_value_2 = false;
+            set_pixel(chip * 8 + row, col, toogle_state(&state2),framebuffer2);
+            max7219_update_display(&dev,framebuffer2);
+        }
+
+        break;
+    case 2:
+    if (user_panel == USER_1 && user_switch == false)
+        {
+            set_value = true;
+            set_pixel(chip * 8 + row, col, true,framebuffer);
+            max7219_update_display(&dev,framebuffer);
+        }
+        else if (user_panel == USER_2 && user_switch == false)
+        {
+            set_value_2 = true;
+            set_pixel(chip * 8 + row, col, true,framebuffer2);
+            max7219_update_display(&dev,framebuffer2);
+        }
+        break;
+
+    // case 3:
+    //     set_pixel(chip * 8 + row, col, toogle_state(&state));
+    //     max7219_update_display(&dev);
+    //     break;
+    
+    default:
+            break;
+        }
+
+} 
