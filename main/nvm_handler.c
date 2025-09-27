@@ -14,7 +14,7 @@ esp_err_t nvm_handler_nvs_storage_init(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    ESP_LOGI(TAG, "NVS initialized");
+  //  ESP_LOGI(TAG, "NVS initialized");
     return ret;
 }
 

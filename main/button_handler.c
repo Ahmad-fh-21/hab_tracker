@@ -59,7 +59,7 @@ void button_init(/*button_handler_t *button*/ void)
     gpio_isr_handler_add(BUTTON_GPIO, button_isr_handler, (void *)BUTTON_GPIO);
 
     //button->button_pressed = false; // init for button flag 
-    ESP_LOGI(TAG, "Button configured on GPIO %d", BUTTON_GPIO);
+   // ESP_LOGI(TAG, "Button configured on GPIO %d", BUTTON_GPIO);
 }
 
 
@@ -92,17 +92,17 @@ void button_task(void *pvParameter)
             // } 
             // else 
             if (press_duration >= LONG_PRESS_THRESHOLD_MS) {
-                ESP_LOGI(TAG, "Long press: %lld ms", press_duration);
+              //  ESP_LOGI(TAG, "Long press: %lld ms", press_duration);
                 press_type = LONG;
                 //do_long_press_action();
             } 
             else {
-                ESP_LOGI(TAG, "Short press: %lld ms", press_duration);
+                //ESP_LOGI(TAG, "Short press: %lld ms", press_duration);
                 press_type = SHORT;
                 //do_short_press_action();
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));  // check periodically
+        vTaskDelay(pdMS_TO_TICKS(100));  // check periodically
     }
 }

@@ -38,7 +38,7 @@ const int retry_count = 10;
 
 
 static void initialize_sntp(void) {
-    printf("Initializing SNTP...\n");
+  //  printf("Initializing SNTP...\n");
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, "bevtime1.metrologie.at");  // You can set your own server
     esp_sntp_init();

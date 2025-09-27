@@ -6,12 +6,8 @@ static const char *TAG = "SLEEP_HANDLER";
 
 void sleep_go_to_deep_sleep(uint64_t time_in_sec)
 {
-    ESP_LOGI(TAG, "Preparing to sleep");
+  //  ESP_LOGI(TAG, "Preparing to sleep");
     
-
-
-
-
     // Flush any pending serial output
     fflush(stdout);
     vTaskDelay(100 / portTICK_PERIOD_MS);

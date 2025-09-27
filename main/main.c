@@ -49,6 +49,11 @@ bool    user_switch = false;           // to indicate if a user switch happens
 // global Var
 QueueHandle_t sleep_queue;
 bool ready_to_sleep = false;           // for the Queue
+QueueHandle_t wifi_queue;
+bool init_wifi_before_sleep = false;
+
+bool isWakeup_Timer = false;
+bool wifi_initiliazed = false;
 
 uint8_t   secCounter = 0;              // to count the standby sec - when is equal to STANDBY_TIME_IN_SEC device goes to sleep
 uint16_t  calculated_sleep_time = 0;   // to store the time in sec for the sleep wake up timer
@@ -61,7 +66,15 @@ uint8_t framebuffer[FRAMEBUFFER_SIZE];   // Panel 1 values
 uint8_t framebuffer2[FRAMEBUFFER_SIZE];  // to be used to add a sec Panel 
 bool firstboot = true;                 // to indicate if this is the First boot - this bool will be used only once and then the NVM is initialized
 
-uint8_t chip,row,col;                  // to control the LED position - calculated throw the month - day 
+//uint8_t chip,row,col;                  // to control the LED position - calculated throw the month - day 
+
+// Store variables in RTC slow memory
+RTC_DATA_ATTR uint8_t chip = 0;
+RTC_DATA_ATTR uint8_t row = 0;
+RTC_DATA_ATTR uint8_t col = 0;
+
+
+
 
 time_storage_t mytime;                 // var to stroe the time after getting it from the time_handler
 
@@ -129,6 +142,32 @@ void sleep_task(void *pvParameters)
         if (xQueueReceive(sleep_queue, &ready_to_sleep, portMAX_DELAY) == pdPASS) 
         {
             
+            // set_pixel(chip * 8 + row, col, set_value,framebuffer);
+            // max7219_update_display(&dev,framebuffer);
+
+            // set_pixel(chip * 8 + row, col, set_value_2,framebuffer2);
+            // max7219_update_display(&dev,framebuffer2);
+
+            // ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,true));
+
+
+
+
+           // ESP_LOGI(TAG, "Saving data before deep sleep...");
+            nvm_handler_save_data_to_nvs(framebuffer, firstboot, framebuffer2);
+            sleep_go_to_deep_sleep(calculated_sleep_time);
+        }
+    }
+}
+
+void wifi_task(void *pvParameters) 
+{
+    while (1) 
+    {
+        // Wait indefinitely for data to arrive in the queue
+        if (xQueueReceive(wifi_queue, &init_wifi_before_sleep, portMAX_DELAY) == pdPASS) 
+        {
+           // ESP_LOGI(TAG, "wifi Task -----------------------");
             set_pixel(chip * 8 + row, col, set_value,framebuffer);
             max7219_update_display(&dev,framebuffer);
 
@@ -136,13 +175,45 @@ void sleep_task(void *pvParameters)
             max7219_update_display(&dev,framebuffer2);
 
             ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,true));
-            ESP_LOGI(TAG, "Saving data before deep sleep...");
-            nvm_handler_save_data_to_nvs(framebuffer, firstboot, framebuffer2);
-            sleep_go_to_deep_sleep(30);
+
+
+            if (isWakeup_Timer == false && wifi_initiliazed == false)
+            {
+               // wifi_handler_init_NVM();
+
+              //  ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+                wifi_handler_init_sta();
+                time_handler_init();
+
+                wifi_initiliazed = true;
+            
+            }
+
+            time_handler_get_time_from_server();
+
+            
+
+            mytime.month = time_handler_get_month();
+            mytime.day   = time_handler_get_day();
+            mytime.hour  = time_handler_get_hour();
+            mytime.min   = time_handler_get_minute();
+            mytime.sec   = time_handler_get_sec();
+
+            calculated_sleep_time = mytime.sec + ((60 - mytime.min) * 60 );
+           // ESP_LOGI(TAG, "Reamining sleep time %d", calculated_sleep_time);
+            main_update_matrix();
+        
+
+            if (xQueueSend(sleep_queue, &ready_to_sleep, pdMS_TO_TICKS(100)) == pdPASS) 
+            {
+                vTaskSuspend(NULL);  // Suspend self after sending to sleep queue
+            } 
+
+
+  
         }
     }
 }
-
 
 
 
@@ -204,10 +275,14 @@ void time_task(void *arg)
         if (secCounter == STANDBY_TIME_IN_SEC)
         {
             
-                if (xQueueSend(sleep_queue, &ready_to_sleep, pdMS_TO_TICKS(100)) == pdPASS) 
-                {
-                    vTaskSuspend(NULL);  // Suspend self after sending to sleep queue
-                } 
+                // if (xQueueSend(sleep_queue, &ready_to_sleep, pdMS_TO_TICKS(100)) == pdPASS) 
+                // {
+                //     vTaskSuspend(NULL);  // Suspend self after sending to sleep queue
+                // } 
+            if (xQueueSend(wifi_queue, &init_wifi_before_sleep, pdMS_TO_TICKS(100)) == pdPASS) 
+            {
+                vTaskSuspend(NULL);  // Suspend self after sending to sleep queue
+            } 
         }
 
         secCounter++;
@@ -223,27 +298,30 @@ void update_led_position_task(void *arg)
 {   
     while (1) 
     {
+        if (isWakeup_Timer)
+        {
+            time_handler_get_time_from_server();
 
-        time_handler_get_time_from_server();
+            mytime.month = time_handler_get_month();
+            mytime.day   = time_handler_get_day();
+            mytime.hour  = time_handler_get_hour();
+            mytime.min   = time_handler_get_minute();
+            mytime.sec   = time_handler_get_sec();
 
-        mytime.month = time_handler_get_month();
-        mytime.day   = time_handler_get_day();
-        mytime.hour  = time_handler_get_hour();
-        mytime.min   = time_handler_get_minute();
-        mytime.sec   = time_handler_get_sec();
+            calculated_sleep_time = mytime.sec + ((60 - mytime.min) * 60 );
 
-        calculated_sleep_time = mytime.sec + ((60 - mytime.min) * 60 );
-
-        main_update_matrix();
-        
-        // printf("Year: %d\n", mytime.year );
-        // printf("Month: %d\n", mytime.month );  // tm_mon: 0 = Jan
-        // printf("Day: %d\n", mytime.day);
-        // printf("Hour: %d\n", mytime.hour);
-        // printf("Minute: %d\n", mytime.min);
-        // printf("sec: %d\n", mytime.sec);
-        // printf("time to sleep: %d\n", calculated_sleep_time);
-       // vTaskDelay(pdMS_TO_TICKS(10000));
+            main_update_matrix();
+            
+            // printf("Year: %d\n", mytime.year );
+            // printf("Month: %d\n", mytime.month );  // tm_mon: 0 = Jan
+            // printf("Day: %d\n", mytime.day);
+            // printf("Hour: %d\n", mytime.hour);
+            // printf("Minute: %d\n", mytime.min);
+            // printf("sec: %d\n", mytime.sec);
+            // printf("time to sleep: %d\n", calculated_sleep_time);
+            // vTaskDelay(pdMS_TO_TICKS(10000));
+        }
+       
         vTaskDelay(pdMS_TO_TICKS(1500));
     }
 }
@@ -298,46 +376,91 @@ void app_main(void)
     uint64_t start = esp_timer_get_time();
     /************************************* */
     button_init();
-    
-    wifi_handler_init_NVM();
 
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    wifi_handler_init_sta();
-    time_handler_init();
+    main_init_display();
+   // ESP_LOGI(TAG, "in main");
+    // wifi_handler_init_NVM();
+
+    // ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    // wifi_handler_init_sta();
+    // time_handler_init();
     
-    time_handler_get_time_from_server();
+    // time_handler_get_time_from_server();
 
     /************************************* */
 
+    wifi_handler_init_NVM();
 
+    if (firstboot == true )
+    {
+        
+     //   ESP_LOGI(TAG, "wifi init for first boot");
+        if (wifi_initiliazed == false )
+        {
+            
+            wifi_handler_init_sta();
+            time_handler_init();
+           
+            wifi_initiliazed = true;
+        
+        }
 
-    nvm_handler_clear_nvs_data();  //<--------------- comment when SW is finished
+    }
+   // nvm_handler_clear_nvs_data();  //<--------------- comment when SW is finished
     main_init_NVM();
 
 
-    main_init_display();
-    ESP_LOGI(TAG, "in main");
+
 
     // Print wake up reason
     esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
 
     sleep_handler_print_wake_reason( wakeup_reason);
+  //  ESP_LOGI(TAG, "in main ----------> wake up timer - first boot %d   %d ", wakeup_reason,firstboot);
     if (wakeup_reason != ESP_SLEEP_WAKEUP_TIMER  && wakeup_reason != 0 )
     {   
-        sleep_handler_print_wake_reason( wakeup_reason);
+   //     sleep_handler_print_wake_reason( wakeup_reason);
         ESP_ERROR_CHECK(max7219_set_shutdown_mode(&dev,false));
         ESP_ERROR_CHECK(max7219_set_brightness(&dev, 2));
         max7219_update_display(&dev,framebuffer);
+    //    ESP_LOGI(TAG, "in main ----------> interrupt");
     }
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER && firstboot == false ) // only if the timer wake up - get time without turn on the display
+    {
+      //  ESP_LOGI(TAG, "in main ----------> wake up timer - first boot %d   %d ", wakeup_reason,firstboot);
+        isWakeup_Timer = true;
+       // firstboot = false;
+        // wifi_handler_init_NVM();
+
+        if (wifi_initiliazed == false)
+        {
+            wifi_handler_init_sta();
+            time_handler_init();
+
+            wifi_initiliazed = true;
+        }
+        time_handler_get_time_from_server();
+    }
+
+
+
+
 
     // Create the queue
     sleep_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
     if (sleep_queue == NULL) 
     {
-        ESP_LOGE(TAG, "Sleep Queue creation failed!");
+        //ESP_LOGE(TAG, "Sleep Queue creation failed!");
         return;
     }
 
+    // Create the queue
+    wifi_queue = xQueueCreate(QUEUE_LENGTH, sizeof(bool));
+    if (wifi_queue == NULL) 
+    {
+       // ESP_LOGE(TAG, "Sleep Queue creation failed!");
+        return;
+    }
 
     /************************************* */
     xTaskCreatePinnedToCore(task, "task", configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL, APP_CPU_NUM); 
@@ -346,12 +469,13 @@ void app_main(void)
     xTaskCreate(update_led_position_task, "update_led_position_task", 4096, NULL, 5, NULL);
     // Start sensor reading task
     xTaskCreate(sleep_task, "sleep_task", 4096, NULL, 5, NULL);
+    xTaskCreate(wifi_task, "wifi_task", 4096, NULL, 5, NULL);
     /************************************* */
     
 
     uint64_t end = esp_timer_get_time(); 
     
-    ESP_LOGI(TAG, " took %llu microseconds", (end - start));
+  //  ESP_LOGI(TAG, " took %llu microseconds", (end - start));
 }
 
 
@@ -379,43 +503,43 @@ static void main_init_NVM()
 {
     // Load data from NVS on startup
     nvm_handler_load_data_from_nvs(framebuffer, &firstboot, framebuffer2);
-    ESP_LOGI(TAG, "firstboot state %d",firstboot);
+  //  ESP_LOGI(TAG, "firstboot state %d",firstboot);
     // Check if this is first boot
     if (firstboot) 
     {
-    nvm_handler_clear_nvs_data();
-    ESP_LOGI(TAG, "This is the first boot!");
-    // For "VIT" in last 3 rows of chip 0 
-    framebuffer[5] = 0b01100110;   // V I T (top row)
-    framebuffer[6] = 0b00111100;   // V I T (middle row)  
-    framebuffer[7] = 0b00011000;   // V I T (bottom row)
+        nvm_handler_clear_nvs_data();
+      //  ESP_LOGI(TAG, "This is the first boot!");
+        // For "VIT" in last 3 rows of chip 0 
+        framebuffer[5] = 0b01100110;   // V I T (top row)
+        framebuffer[6] = 0b00111100;   // V I T (middle row)  
+        framebuffer[7] = 0b00011000;   // V I T (bottom row)
 
-    // For "VIT" in last 3 rows of chip 1 
-    framebuffer[13] = 0b00011000;  
-    framebuffer[14] = 0b00011000;  
-    framebuffer[15] = 0b00011000;  
+        // For "VIT" in last 3 rows of chip 1 
+        framebuffer[13] = 0b00011000;  
+        framebuffer[14] = 0b00011000;  
+        framebuffer[15] = 0b00011000;  
 
-    // For "VIT" in last 3 rows of chip 2 
-    framebuffer[21] = 0b01111110;  
-    framebuffer[22] = 0b00011000;  
-    framebuffer[23] = 0b00011000;  
+        // For "VIT" in last 3 rows of chip 2 
+        framebuffer[21] = 0b01111110;  
+        framebuffer[22] = 0b00011000;  
+        framebuffer[23] = 0b00011000;  
 
-    // For "GYM" in last 3 rows of chip 0 
-    framebuffer2[5] = 0b01111000;   
-    framebuffer2[6] = 0b01100011;   
-    framebuffer2[7] = 0b01111101;   
+        // For "GYM" in last 3 rows of chip 0 
+        framebuffer2[5] = 0b00011111;   
+        framebuffer2[6] = 0b01100011;   
+        framebuffer2[7] = 0b01011111;   
 
-    // For "GYM" in last 3 rows of chip 1 
-    framebuffer2[13] = 0b01100110;  
-    framebuffer2[14] = 0b00011000;  
-    framebuffer2[15] = 0b00011000;  
+        // For "GYM" in last 3 rows of chip 1 
+        framebuffer2[13] = 0b01100110;  
+        framebuffer2[14] = 0b00011000;  
+        framebuffer2[15] = 0b00011000;  
 
-    // For "GYM"" in last 3 rows of chip 2 
-    framebuffer2[21] = 0b11111111;  
-    framebuffer2[22] = 0b11011011;  
-    framebuffer2[23] = 0b11011011;  
+        // For "GYM"" in last 3 rows of chip 2 
+        framebuffer2[21] = 0b11111111;  
+        framebuffer2[22] = 0b11011011;  
+        framebuffer2[23] = 0b11011011;  
 
-    firstboot = false; // Set to false after first boot
+        firstboot = false; // Set to false after first boot   ----> comment because it will be set to false in later stage in main 
     } 
     else 
     {
@@ -444,7 +568,7 @@ static void main_short_long_press_handler()
             presses++;
             if (presses > 2) presses = 1;
             
-            printf("Button pressed!\n");
+         //   printf("Button pressed!\n");
             //max7219_clear_all(&dev);
             secCounter = 0; // reset the conter to wait agian from 0
         }
@@ -461,7 +585,7 @@ static void main_short_long_press_handler()
                 user_panel = USER_1;
                 max7219_update_display(&dev,framebuffer);
             } 
-            printf("Button pressed LONG!\n");
+           // printf("Button pressed LONG!\n");
             
             user_switch = true;
         }
